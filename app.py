@@ -9,7 +9,7 @@ import os
 app = Flask(__name__)
 
 # ================== 配置 ==================
-DEEPSEEK_API_KEY = "sk-2dc6d0d9316f414a9f17d111523f007a"  # 请替换
+DEEPSEEK_API_KEY = "sk-2dc6d0d9316f414a9f17d111523f007a"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
 # 初始化数据库
@@ -307,6 +307,8 @@ def get_budget_api():
         return jsonify({"total_budget": b["total_budget"], "expected_save": b["expected_save"]})
     return jsonify({"total_budget": None, "expected_save": None})
 
-if __name__ == '__main__':
-    init_db()
-    app.run(debug=True)
+# ================== 关键修复 ==================
+# 自动初始化数据库（Vercel 必须）
+init_db()
+
+# 彻底删除了 app.run()，解决 Vercel 500 错误
