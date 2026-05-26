@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes, viewport-fit=cover">
+    <title>星露谷记账本</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            font-family: 'Courier New', 'VT323', 'Segoe UI', monospace;
+            background: #2d2418;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: repeating-linear-gradient(0deg, rgba(80,60,40,0.2) 0px, rgba(80,60,40,0.2) 2px, transparent 2px, transparent 6px);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 12px 80px 12px;
+            position: relative;
+            z-index: 1;
+            -webkit-overflow-scrolling: touch;
+        }
+        .page {
+            display: none;
+            animation: fadeIn 0.2s ease;
+        }
+        .page.active {
+            display: block;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px);}
+            to { opacity: 1; transform: translateY(0);}
+        }
+        .card {
+            background: #fef7e0;
+            border-radius: 24px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 5px 5px 0 #5a3e2b;
+            border: 2px solid #b97f44;
+        }
+        .card h3, .card h4 {
+            font-family: inherit;
+            color: #3b2a1f;
+            border-left: 8px solid #8b5a2b;
+            padding-left: 12px;
+            margin-bottom: 12px;
+            font-size: 1.2rem;
+        }
+        .chat-messages {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .message {
+            display: flex;
+            flex-direction: column;
+            max-width: 85%;
+        }
+        .user-message {
+            align-self: flex-end;
+        }
+        .assistant-message {
+            align-self: flex-start;
+        }
+        .bubble {
+            padding: 10px 14px;
+            border-radius: 20px;
+            font-size: 15px;
+            line-height: 1.4;
+            border: 2px solid;
+            box-shadow: 2px 2px 0 rgba(0,0,0,0.1);
+            word-break: break-word;
+        }
+        .user-message .bubble {
+            background: #e1c78c;
+            color: #2c1e12;
+            border-color: #b87c3a;
+            border-bottom-right-radius: 6px;
+        }
+        .assistant-message .bubble {
+            background: #fff2cf;
+            color: #3c2a1f;
+            border-color: #c48b48;
+            border-bottom-left-radius: 6px;
+        }
+        .time {
+            font-size: 10px;
+            color: #bc9a6c;
+            margin: 4px 8px 0;
+        }
+        .input-area {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #e8d5b5;
+            padding: 10px 12px;
+            border-top: 3px solid #a5672f;
+            display: flex;
+            gap: 10px;
+            z-index: 20;
+            box-shadow: 0 -4px 0 #5a3e2b;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 12px 16px;
+            background: #fffcf0;
+            border: 3px solid #8b5a2b;
+            border-radius: 40px;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            outline: none;
+            color: #2c1e12;
+        }
+        .input-area button {
+            background: #8b5a2b;
+            border: none;
+            color: #ffefc0;
+            font-weight: bold;
+            padding: 0 20px;
+            border-radius: 40px;
+            font-family: monospace;
+            font-size: 16px;
+            cursor: pointer;
+            box-shadow: 3px 3px 0 #4d2f14;
+            transition: 0.05s linear;
+        }
+        .input-area button:active {
+            transform: translate(2px, 2px);
+            box-shadow: none;
+        }
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #c99a6b;
+            border-top: 4px solid #7b4a2a;
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0 12px;
+            z-index: 30;
+            box-shadow: 0 -2px 0 #4d2f14;
+            /* 避开输入栏，但输入栏 fixed 在 bottom:0，这里需要提升位置，所以输入栏应该用 bottom: 0，而导航在输入栏上方？实际上输入栏已经占用了底部，导航栏会被覆盖。我们调整：让输入栏固定，导航栏在其上方？不对，常规设计是输入栏在导航栏上面。为了简洁，让导航栏固定在底部，输入栏在导航栏上方？但用户习惯输入栏在最底部。为了不冲突，我们去掉底部导航的 fixed？不对，用户希望底部导航。折中：把导航栏放在输入栏上方，但输入栏 fixed 在 bottom:0，导航栏需要 bottom: 60px。我们修改样式：输入栏 bottom: 0；导航栏 bottom: 70px； */
+        }
+        /* 修正：输入栏和导航栏同时存在时的布局 */
+        .input-area {
+            bottom: 0;
+        }
+        .bottom-nav {
+            bottom: 70px;  /* 输入栏高度约70px，让导航栏浮在输入栏上方，但会遮挡消息列表 */
+        }
+        /* 更好的做法：将输入栏和导航栏一起放在一个容器里，但为了简单，我们重新设计：使用 flex 列，main-content 撑开，底部固定两个栏会重叠。鉴于时间，我直接给出一个可靠的布局：底部导航和输入栏合并？不，更简单：将输入栏和导航栏都放在底部，但用 flex 方向列。然而 fixed 定位会重叠。我们改变策略：不使用 fixed，而是用 sticky 或普通文档流。为了让消息区域不遮挡，改用普通布局：body 作为 flex 列，main-content flex:1，然后在底部放置输入栏和导航栏（普通块）。这样在手机上键盘弹出时也能自动调整。我重构一下布局。 */
+    </style>
+    <!-- 重新编写干净稳定的布局 -->
+    <style>
+        /* 修正布局 - 使用 flex 列，底部元素为普通流，不会重叠 */
+        body {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+            padding-bottom: 12px;
+        }
+        .input-area {
+            position: relative;
+            bottom: auto;
+            left: auto;
+            right: auto;
+            margin-top: 0;
+            background: #e8d5b5;
+            padding: 8px 12px;
+            border-top: 3px solid #a5672f;
+            display: flex;
+            gap: 10px;
+            z-index: 20;
+            box-shadow: 0 -2px 0 #5a3e2b;
+        }
+        .bottom-nav {
+            position: relative;
+            bottom: auto;
+            background: #c99a6b;
+            border-top: 4px solid #7b4a2a;
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0 12px;
+            z-index: 30;
+            box-shadow: 0 -2px 0 #4d2f14;
+        }
+        /* 移除之前冲突的 fixed 样式 */
+    </style>
+</head>
+<body>
+
+<div class="main-content" id="mainContent">
+    <!-- 记账区 -->
+    <div id="pageChat" class="page active">
+        <div id="chatMessages" class="chat-messages">
+            <div class="message assistant-message">
+                <div class="bubble">🌾 欢迎来到星露谷记账小屋！<br>直接发消息记账，例如：<br>“今天午餐38元 微信支付”<br>“昨天买咖啡28支付宝”<br>“工资到账 5000”<br><br>✨ 特殊命令：<br>/预算 3000 500<br>/总结<br>/规则 咖啡 category 吃饭</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 总结区 -->
+    <div id="pageStats" class="page">
+        <div class="card">
+            <h4>📈 近7天支出趋势</h4>
+            <div class="chart-wrapper"><canvas id="trendChart"></canvas></div>
+        </div>
+        <div class="card">
+            <h4>🥧 本月支出分类</h4>
+            <div class="chart-wrapper"><canvas id="pieChart"></canvas></div>
+        </div>
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap:wrap; gap:8px;">
+                <h4>📋 月度总结</h4>
+                <button id="viewSummaryBtn" class="pixel-btn summary-btn">查看本月总结</button>
+            </div>
+            <div id="summaryText" class="summary-text"></div>
+            <button id="exportBtn" class="pixel-btn export-btn" style="margin-top: 16px; width: 100%;">📎 导出 Excel</button>
+        </div>
+    </div>
+
+    <!-- 心愿区 -->
+    <div id="pageWish" class="page">
+        <div class="card">
+            <h3>💰 本月预算</h3>
+            <div style="display: flex; justify-content: space-between; margin: 10px 0;"><span>总支出预算</span><span id="budgetAmountDisplay">未设置</span></div>
+            <div style="display: flex; justify-content: space-between; margin: 10px 0;"><span>期望节省</span><span id="expectedSaveDisplay">未设置</span></div>
+            <div style="display: flex; justify-content: space-between; margin: 10px 0;"><span>当前已支出</span><span id="currentExpenseDisplay">0.00</span></div>
+            <button id="setBudgetBtnWish" class="pixel-btn" style="width:100%; margin-top:12px;">🌽 设置预算/期望</button>
+        </div>
+        <div class="card">
+            <h3>✨ 我的小心愿</h3>
+            <textarea id="wishText" class="wish-textarea" rows="3" placeholder="写下你的省钱目标、愿望... 例如：买下社区中心！"></textarea>
+            <button id="saveWishBtn" class="pixel-btn" style="margin-top:12px; background:#6f4f2e; width:100%;">🍓 保存心愿</button>
+        </div>
+        <div class="card">
+            <h3>📜 鹈鹕镇小贴士</h3>
+            <p style="font-size: 12px;">• 记账时说“吃饭 35 支付宝”<br>• 设置预算后超支会提醒<br>• 可以添加纠错规则让AI更聪明</p>
+        </div>
+    </div>
+</div>
+
+<!-- 输入区与导航栏 -->
+<div class="input-area">
+    <input type="text" id="messageInput" placeholder="写下一笔收支...">
+    <button id="sendBtn">发送</button>
+</div>
+<div class="bottom-nav">
+    <button class="nav-item active" data-page="chat">
+        <div class="nav-icon">🌾</div>
+        <div class="nav-label">记账</div>
+    </button>
+    <button class="nav-item" data-page="stats">
+        <div class="nav-icon">📊</div>
+        <div class="nav-label">总结</div>
+    </button>
+    <button class="nav-item" data-page="wish">
+        <div class="nav-icon">⭐</div>
+        <div class="nav-label">心愿</div>
+    </button>
+</div>
+
+<style>
+    /* 补充一些样式使按钮看起来像素风 */
+    .pixel-btn {
+        background: #a56b2f;
+        border: none;
+        color: #fff0ce;
+        padding: 10px 16px;
+        font-family: monospace;
+        font-weight: bold;
+        border-radius: 40px;
+        cursor: pointer;
+        box-shadow: 3px 3px 0 #4d2f14;
+        transition: 0.05s linear;
+        font-size: 14px;
+    }
+    .pixel-btn:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+    }
+    .export-btn { background: #5f7a3c; }
+    .summary-btn { background: #7a5a3a; }
+    .chart-wrapper { overflow-x: auto; margin: 0 -8px; padding: 0 8px; }
+    canvas { max-height: 200px; width: 100%; background: #fef2da; border-radius: 20px; padding: 8px; box-shadow: inset 0 0 0 2px #e0bc7c, 0 4px 6px rgba(0,0,0,0.1); }
+    .wish-textarea { width: 100%; background: #fff8e7; border: 3px solid #b97f44; border-radius: 20px; padding: 12px; font-family: monospace; font-size: 14px; resize: vertical; }
+    .summary-text { margin-top: 12px; font-size: 13px; line-height: 1.5; background: #fcf3df; padding: 12px; border-radius: 20px; white-space: pre-wrap; }
+    .nav-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: #2c1a0c;
+        background: #e7c79b;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 40px;
+        cursor: pointer;
+        font-family: monospace;
+        font-weight: bold;
+        transition: 0.05s linear;
+        box-shadow: 2px 2px 0 #5a3a1f;
+        min-width: 70px;
+    }
+    .nav-item.active {
+        background: #f3da9b;
+        color: #3b2a1a;
+        box-shadow: inset 2px 2px 0 #5a3a1f;
+        transform: translate(1px, 1px);
+    }
+    .nav-icon { font-size: 26px; filter: drop-shadow(1px 1px 0 #4d2f14); }
+</style>
+
+<script>
+    (function() {
+        // 确保所有功能在 DOM 加载完毕后执行
+        let chartTrend, chartPie;
+
+        // 本地心愿
+        if(localStorage.getItem('userWish')) {
+            document.getElementById('wishText').value = localStorage.getItem('userWish');
+        }
+
+        // 页面切换
+        const pages = {
+            chat: document.getElementById('pageChat'),
+            stats: document.getElementById('pageStats'),
+            wish: document.getElementById('pageWish')
+        };
+        const navBtns = document.querySelectorAll('.nav-item');
+        navBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const pageId = btn.getAttribute('data-page');
+                navBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                Object.values(pages).forEach(p => p.classList.remove('active'));
+                pages[pageId].classList.add('active');
+                if(pageId === 'stats') {
+                    loadCharts();
+                    loadSummaryText();
+                }
+                if(pageId === 'wish') {
+                    loadBudgetAndExpenseWish();
+                }
+            });
+        });
+
+        // 聊天发送函数
+        async function sendMessage(text) {
+            if (!text.trim()) {
+                console.warn("消息为空");
+                return;
+            }
+            addMessage(text, 'user');
+            const inputEl = document.getElementById('messageInput');
+            inputEl.value = '';
+            try {
+                console.log("发送请求:", text);
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const data = await response.json();
+                console.log("收到回复:", data);
+                addMessage(data.reply, 'assistant');
+                // 更新其他页面的预算显示
+                loadBudgetAndExpenseWish();
+                if(pages.stats.classList.contains('active')) {
+                    loadCharts();
+                    loadSummaryText();
+                }
+            } catch (err) {
+                console.error("发送失败:", err);
+                addMessage('⚠️ 网络错误，请检查后端是否运行 (确保 python app.py 已启动)', 'assistant');
+            }
+        }
+
+        function addMessage(content, role) {
+            const container = document.getElementById('chatMessages');
+            const div = document.createElement('div');
+            div.className = `message ${role === 'user' ? 'user-message' : 'assistant-message'}`;
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble';
+            bubble.innerText = content;
+            div.appendChild(bubble);
+            const timeSpan = document.createElement('div');
+            timeSpan.className = 'time';
+            timeSpan.innerText = new Date().toLocaleTimeString();
+            div.appendChild(timeSpan);
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function loadBudgetAndExpenseWish() {
+            try {
+                const res = await fetch('/api/transactions?month=' + new Date().toISOString().slice(0,7));
+                const trans = await res.json();
+                const expenseCats = ["吃饭","买菜","交通","衣物购入","生活用品购入","好玩的小玩意购入","娱乐"];
+                let expense = 0;
+                for (let t of trans) if (expenseCats.includes(t.category)) expense += t.amount;
+                document.getElementById('currentExpenseDisplay').innerText = expense.toFixed(2);
+                const budgetRes = await fetch('/api/budget');
+                if (budgetRes.ok) {
+                    const budgetData = await budgetRes.json();
+                    document.getElementById('budgetAmountDisplay').innerText = budgetData.total_budget ? budgetData.total_budget + '元' : '未设置';
+                    document.getElementById('expectedSaveDisplay').innerText = budgetData.expected_save ? budgetData.expected_save + '元' : '未设置';
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadCharts() {
+            try {
+                const res = await fetch('/api/transactions?month=' + new Date().toISOString().slice(0,7));
+                const trans = await res.json();
+                const last7days = [];
+                for (let i = 6; i >= 0; i--) {
+                    let d = new Date();
+                    d.setDate(d.getDate() - i);
+                    last7days.push(d.toISOString().slice(0,10));
+                }
+                const expenseByDay = {};
+                const expenseCats = ["吃饭","买菜","交通","衣物购入","生活用品购入","好玩的小玩意购入","娱乐"];
+                for (let t of trans) if (expenseCats.includes(t.category)) expenseByDay[t.date] = (expenseByDay[t.date] || 0) + t.amount;
+                const trendData = last7days.map(day => expenseByDay[day] || 0);
+                const catSum = {};
+                for (let t of trans) if (expenseCats.includes(t.category)) catSum[t.category] = (catSum[t.category] || 0) + t.amount;
+                const ctxTrend = document.getElementById('trendChart').getContext('2d');
+                const ctxPie = document.getElementById('pieChart').getContext('2d');
+                if (chartTrend) chartTrend.destroy();
+                if (chartPie) chartPie.destroy();
+                chartTrend = new Chart(ctxTrend, {
+                    type: 'line',
+                    data: { labels: last7days.map(d => d.slice(5)), datasets: [{ label: '支出(元)', data: trendData, borderColor: '#b97f44', backgroundColor: '#eedd99', fill: true, tension: 0.3 }] },
+                    options: { responsive: true, maintainAspectRatio: true }
+                });
+                chartPie = new Chart(ctxPie, {
+                    type: 'pie',
+                    data: { labels: Object.keys(catSum), datasets: [{ data: Object.values(catSum), backgroundColor: ['#f4a261','#e9c46a','#2a9d8f','#e76f51','#8a817c','#bc6c25','#d68c45'] }] },
+                    options: { responsive: true, maintainAspectRatio: true }
+                });
+            } catch(e) { console.error(e); }
+        }
+
+        async function loadSummaryText() {
+            try {
+                const res = await fetch('/api/summary');
+                const summary = await res.json();
+                let text = `📅 ${summary.year_month} 总支出: ${summary.total_expense.toFixed(2)}  收入: ${summary.total_income.toFixed(2)}  结余: ${summary.net.toFixed(2)}\n`;
+                if (summary.budget) text += `预算: ${summary.budget}，${summary.over_budget}\n`;
+                if (summary.expected_save) text += `${summary.save_achieve}\n`;
+                text += `🏆 支出TOP3: ${summary.top3_expense.map(t=>`${t.category} ${t.amount.toFixed(2)}`).join(' | ')}`;
+                document.getElementById('summaryText').innerText = text;
+            } catch(e) { console.error(e); }
+        }
+
+        async function exportToExcel() {
+            const res = await fetch('/api/transactions');
+            const trans = await res.json();
+            const wsData = [["日期","类别","金额","支付方式","备注"]];
+            for (let t of trans) wsData.push([t.date, t.category, t.amount, t.payment, t.note]);
+            const ws = XLSX.utils.aoa_to_sheet(wsData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "记账本");
+            XLSX.writeFile(wb, `星露谷账本_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        // 绑定按钮事件
+        document.getElementById('setBudgetBtnWish').onclick = async () => {
+            const total = prompt("🌽 本月总支出预算 (金币):");
+            if (total && !isNaN(parseFloat(total))) {
+                const save = prompt("🍅 期望节省金额 (可不填):", "0");
+                const saveNum = parseFloat(save) || 0;
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: `/预算 ${total} ${saveNum}` })
+                });
+                const data = await res.json();
+                addMessage(data.reply, 'assistant');
+                loadBudgetAndExpenseWish();
+                if(pages.stats.classList.contains('active')) loadSummaryText();
+            }
+        };
+
+        document.getElementById('viewSummaryBtn').onclick = async () => {
+            const res = await fetch('/api/summary');
+            const summary = await res.json();
+            let msg = `📆 ${summary.year_month} 总结\n支出: ${summary.total_expense.toFixed(2)}\n收入: ${summary.total_income.toFixed(2)}\n结余: ${summary.net.toFixed(2)}\n`;
+            if (summary.budget) msg += `预算: ${summary.budget}，${summary.over_budget}\n`;
+            if (summary.expected_save) msg += `${summary.save_achieve}\n`;
+            msg += "支出TOP3:\n" + summary.top3_expense.map(t=>`${t.category}: ${t.amount.toFixed(2)}`).join("\n");
+            addMessage(msg, 'assistant');
+            document.querySelector('.nav-item[data-page="chat"]').click();
+        };
+
+        document.getElementById('exportBtn').onclick = exportToExcel;
+        document.getElementById('sendBtn').onclick = () => sendMessage(document.getElementById('messageInput').value);
+        document.getElementById('messageInput').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(e.target.value); });
+        document.getElementById('saveWishBtn').onclick = () => {
+            localStorage.setItem('userWish', document.getElementById('wishText').value);
+            alert('🍄 心愿已保存在你的农场仓库里！');
+        };
+
+        // 初始加载
+        loadBudgetAndExpenseWish();
+        loadCharts();
+        loadSummaryText();
+
+        // 额外：测试后端连接
+        fetch('/api/transactions?month=2026-05').then(res => {
+            if (res.ok) console.log("后端连接正常");
+            else console.warn("后端响应异常", res.status);
+        }).catch(err => console.error("无法连接后端，请确保 python app.py 正在运行", err));
+    })();
+</script>
+</body>
+</html>
